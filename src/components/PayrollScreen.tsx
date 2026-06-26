@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Block, Step } from '../data/personas'
 
 type FieldsBlock = Extract<Block, { t: 'fields' }>
@@ -19,7 +20,49 @@ type NoteBlock = Extract<Block, { t: 'note' }>
 type EsignBlock = Extract<Block, { t: 'esign' }>
 type CompleteBlock = Extract<Block, { t: 'complete' }>
 
+type CheckState = 'todo' | 'prog' | 'done'
+
 export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: 'flow' | 'doc'; screenIndex: number }) {
+  // Track selected choice per block (by block index)
+  const [selectedChoices, setSelectedChoices] = useState<Record<number, number>>({})
+  // Track checklist item states per block (by block index -> item index -> state)
+  const [checkStates, setCheckStates] = useState<Record<number, Record<number, CheckState>>>({})
+  // Track dismissed alerts per block (by block index -> set of alert titles)
+  const [dismissedAlerts, setDismissedAlerts] = useState<Record<number, Set<string>>>({})
+  // Track action button feedback per block (by block index -> item label -> done)
+  const [actionDone, setActionDone] = useState<Record<number, Record<string, boolean>>>({})
+  // Track which tile was last clicked (for animation)
+  const [activeTile, setActiveTile] = useState<string | null>(null)
+
+  const cycleCheck = (blockIdx: number, itemIdx: number, current: CheckState) => {
+    const next: CheckState = current === 'todo' ? 'prog' : current === 'prog' ? 'done' : 'todo'
+    setCheckStates((prev) => ({
+      ...prev,
+      [blockIdx]: { ...(prev[blockIdx] || {}), [itemIdx]: next },
+    }))
+  }
+
+  const dismissAlert = (blockIdx: number, title: string) => {
+    setDismissedAlerts((prev) => {
+      const s = new Set(prev[blockIdx] || [])
+      s.add(title)
+      return { ...prev, [blockIdx]: s }
+    })
+  }
+
+  const fireAction = (blockIdx: number, label: string) => {
+    setActionDone((prev) => ({
+      ...prev,
+      [blockIdx]: { ...(prev[blockIdx] || {}), [label]: true },
+    }))
+    setTimeout(() => {
+      setActionDone((prev) => ({
+        ...prev,
+        [blockIdx]: { ...(prev[blockIdx] || {}), [label]: false },
+      }))
+    }, 2000)
+  }
+
   const renderFields = (block: FieldsBlock) => (
     <div className="block">
       {block.title && <div className="block-title">{block.title}</div>}
@@ -30,6 +73,7 @@ export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: '
           if (field.select) classes.push('select')
           if (field.filled) classes.push('filled')
           if (empty || (field.select && (!field.val || field.val === 'Select'))) classes.push('ph')
+          if (empty) classes.push('field-cursor')
           const text = field.filled || field.select ? field.val || 'Select' : field.val || field.ph || ''
           return (
             <div key={field.label} className={`field ${field.full ? 'full' : ''}`}>
@@ -50,12 +94,19 @@ export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: '
       {block.title && <div className="block-title">{block.title}</div>}
       <div className="tiles">
         {block.items.map((item: TilesBlock['items'][number]) => (
-          <div key={item.tt} className="tile">
+          <button
+            key={item.tt}
+            className={`tile tile-btn ${activeTile === item.tt ? 'tile-pressed' : ''}`}
+            onClick={() => {
+              setActiveTile(item.tt)
+              setTimeout(() => setActiveTile(null), 300)
+            }}
+          >
             <div className="ti">{item.i}</div>
             <div className="tt">{item.tt}</div>
             <div className="ts">{item.ts}</div>
             {item.badge ? <span className="tb">{item.badge}</span> : null}
-          </div>
+          </button>
         ))}
       </div>
     </div>
@@ -159,7 +210,7 @@ export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: '
           </thead>
           <tbody>
             {block.rows.map((row, rowIndex) => (
-              <tr key={rowIndex}>
+              <tr key={rowIndex} className="tbl-row-hover">
                 {row.map((cell, cellIndex) => (
                   <td key={cellIndex} className={block.cols[cellIndex]?.num ? 'num' : ''}>
                     {cell}
@@ -220,7 +271,7 @@ export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: '
           <span className="pc">{block.gross.cur}</span>
           <span className="py">{block.gross.ytd}</span>
         </div>
-        <div className="pay-sec">Taxes & deductions</div>
+        <div className="pay-sec">Taxes &amp; deductions</div>
         {block.deductions.map((row: PayslipBlock['deductions'][number]) => (
           <div key={row.label} className="pay-row">
             <span className="pl">{row.label}</span>
@@ -249,7 +300,7 @@ export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: '
       {block.title && <div className="block-title">{block.title}</div>}
       <div className="docs">
         {block.items.map((item: DocsBlock['items'][number]) => (
-          <div key={item.n} className="doc">
+          <div key={item.n} className="doc doc-hover">
             <div className="fi" />
             <div>
               <div className="dn">{item.n}</div>
@@ -276,67 +327,102 @@ export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: '
     </div>
   )
 
-  const renderChecklist = (block: ChecklistBlock) => (
+  const renderChecklist = (block: ChecklistBlock, blockIdx: number) => (
     <div className="block">
       {block.title && <div className="block-title">{block.title}</div>}
       <div className="checklist">
-        {block.items.map((item: ChecklistBlock['items'][number]) => (
-          <div key={item.c} className="ci">
-            <span className={`mk ${item.s}`}>{item.s === 'done' ? '✓' : item.s === 'prog' ? '◔' : '·'}</span>
-            <div className="ct">
-              {item.c}
-              {item.st ? <small>{item.st}</small> : null}
-            </div>
-            <span className={`st ${item.s}`}>{item.st}</span>
-          </div>
-        ))}
+        {block.items.map((item: ChecklistBlock['items'][number], itemIdx: number) => {
+          const state: CheckState = checkStates[blockIdx]?.[itemIdx] ?? item.s
+          const icons: Record<CheckState, string> = { done: '✓', prog: '◔', todo: '·' }
+          return (
+            <button
+              key={item.c}
+              className={`ci ci-interactive`}
+              onClick={() => cycleCheck(blockIdx, itemIdx, state)}
+              title="Click to update status"
+            >
+              <span className={`mk ${state}`}>{icons[state]}</span>
+              <div className="ct">
+                {item.c}
+                {item.st ? <small>{item.st}</small> : null}
+              </div>
+              <span className={`st ${state}`}>{state === 'done' ? 'Done' : state === 'prog' ? 'In progress' : 'To do'}</span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
 
-  const renderAlerts = (block: AlertsBlock) => (
-    <div className="block">
-      {block.title && <div className="block-title">{block.title}</div>}
-      <div className="alerts">
-        {block.items.map((item: AlertsBlock['items'][number]) => (
-          <div key={item.title} className={`alert ${item.sev}`}>
-            <span className="as">{item.icon}</span>
-            <div>
-              <div className="at">{item.title}</div>
-              <div className="ad">{item.sub}</div>
+  const renderAlerts = (block: AlertsBlock, blockIdx: number) => {
+    const dismissed = dismissedAlerts[blockIdx] || new Set()
+    const visible = block.items.filter((item) => !dismissed.has(item.title))
+    return (
+      <div className="block">
+        {block.title && <div className="block-title">{block.title}</div>}
+        <div className="alerts">
+          {visible.length === 0 && (
+            <div className="alerts-empty">✓ All alerts resolved</div>
+          )}
+          {visible.map((item: AlertsBlock['items'][number]) => (
+            <div key={item.title} className={`alert ${item.sev} alert-dismissable`}>
+              <span className="as">{item.icon}</span>
+              <div>
+                <div className="at">{item.title}</div>
+                <div className="ad">{item.sub}</div>
+              </div>
+              <span className="ab">{item.ab}</span>
+              <button
+                className="alert-dismiss"
+                onClick={() => dismissAlert(blockIdx, item.title)}
+                aria-label="Dismiss alert"
+              >✕</button>
             </div>
-            <span className="ab">{item.ab}</span>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
-  const renderChoices = (block: ChoicesBlock) => (
-    <div className="block">
-      {block.title && <div className="block-title">{block.title}</div>}
-      <div className="choices">
-        {block.items.map((item: ChoicesBlock['items'][number]) => (
-          <div key={item.l} className={`choice ${item.sel ? 'sel' : ''}`}>
-            <div className="ra" />
-            <div>
-              <div className="cl">{item.l}</div>
-              <div className="cs">{item.s}</div>
-            </div>
-          </div>
-        ))}
+  const renderChoices = (block: ChoicesBlock, blockIdx: number) => {
+    const selected = selectedChoices[blockIdx] ?? block.items.findIndex((i) => i.sel)
+    return (
+      <div className="block">
+        {block.title && <div className="block-title">{block.title}</div>}
+        <div className="choices">
+          {block.items.map((item: ChoicesBlock['items'][number], idx: number) => (
+            <button
+              key={item.l}
+              className={`choice ${selected === idx ? 'sel' : ''}`}
+              onClick={() => setSelectedChoices((prev) => ({ ...prev, [blockIdx]: idx }))}
+            >
+              <div className="ra" />
+              <div>
+                <div className="cl">{item.l}</div>
+                <div className="cs">{item.s}</div>
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
-  const renderActions = (block: ActionsBlock) => (
+  const renderActions = (block: ActionsBlock, blockIdx: number) => (
     <div className="block">
       <div className="inline-actions">
-        {block.items.map((item: ActionsBlock['items'][number]) => (
-          <button key={item.label} className={`btn ${item.kind === 'primary' ? 'btn-primary' : ''}`} disabled>
-            {item.label}
-          </button>
-        ))}
+        {block.items.map((item: ActionsBlock['items'][number]) => {
+          const done = actionDone[blockIdx]?.[item.label]
+          return (
+            <button
+              key={item.label}
+              className={`btn ${item.kind === 'primary' ? 'btn-primary' : ''} ${done ? 'btn-done' : ''}`}
+              onClick={() => fireAction(blockIdx, item.label)}
+            >
+              {done ? `✓ Done!` : item.label}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -391,13 +477,13 @@ export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: '
       case 'review':
         return <div key={index}>{renderReview(block)}</div>
       case 'checklist':
-        return <div key={index}>{renderChecklist(block)}</div>
+        return <div key={index}>{renderChecklist(block, index)}</div>
       case 'alerts':
-        return <div key={index}>{renderAlerts(block)}</div>
+        return <div key={index}>{renderAlerts(block, index)}</div>
       case 'choices':
-        return <div key={index}>{renderChoices(block)}</div>
+        return <div key={index}>{renderChoices(block, index)}</div>
       case 'actions':
-        return <div key={index}>{renderActions(block)}</div>
+        return <div key={index}>{renderActions(block, index)}</div>
       case 'note':
         return <div key={index}>{renderNote(block)}</div>
       case 'esign':
@@ -410,7 +496,7 @@ export function PayrollScreen({ step, mode, screenIndex }: { step: Step; mode: '
   }
 
   return (
-    <article className="screen">
+    <article className="screen screen-enter">
       <div className="crumbs">
         Payroll › <span>{step.crumb}</span>
       </div>

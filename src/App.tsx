@@ -23,7 +23,7 @@ function App() {
   const persona = personaByFlow[flowType]
   const [mode, setMode] = useState<Mode>('flow')
   const [index, setIndex] = useState(0)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 768)
   const current = flowType === 'run' ? RUN_PERSONAS[persona] : PERSONAS[persona]
   const step = current.steps[index]
 
@@ -108,6 +108,9 @@ function App() {
         </div>
       </nav>
 
+      {sidebarOpen && (
+        <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+      )}
       <div className={`main-grid ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
         <aside className={`side-menu ${sidebarOpen ? '' : 'closed'}`} aria-label="Payroll navigation">
           <button className="sidebar-close" type="button" onClick={() => setSidebarOpen(false)}>
@@ -116,14 +119,14 @@ function App() {
           <button
             type="button"
             className={`menu-btn ${flowType === 'run' ? 'active' : ''}`}
-            onClick={() => selectFlowType('run')}
+            onClick={() => { selectFlowType('run'); if (window.innerWidth <= 768) setSidebarOpen(false) }}
           >
             Payroll
           </button>
           <button
             type="button"
             className={`menu-btn ${flowType === 'output' ? 'active' : ''}`}
-            onClick={() => selectFlowType('output')}
+            onClick={() => { selectFlowType('output'); if (window.innerWidth <= 768) setSidebarOpen(false) }}
           >
             Payroll results
           </button>
